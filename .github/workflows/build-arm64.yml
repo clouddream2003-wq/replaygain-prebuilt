@@ -17,11 +17,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config unzip
-      - name: Setup NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: 27.3.13750724
-          add-to-path: true
+      - name: Use preinstalled NDK
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          ls -d /usr/local/lib/android/sdk/ndk/*
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version || true
       - name: Build ebur128
         run: |
           git clone --depth 1 https://github.com/jiixyj/libebur128.git
