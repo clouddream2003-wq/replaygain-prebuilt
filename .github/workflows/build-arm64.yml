@@ -30,7 +30,10 @@ jobs:
           cmake --install libebur128/build --prefix $GITHUB_WORKSPACE/install
       - name: Build TagLib
         run: |
-          git clone --depth 1 --branch v2.0.2 https://github.com/taglib/taglib.git
+          git clone --depth 1 --branch v2.0.2 --recurse-submodules https://github.com/taglib/taglib.git
+          cd taglib
+          git submodule update --init --recursive
+          cd ..
           cmake -S taglib -B taglib/build -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWITH_MP4=ON -DWITH_ASF=ON -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF
           cmake --build taglib/build -j$(nproc)
           cmake --install taglib/build --prefix $GITHUB_WORKSPACE/install
@@ -38,7 +41,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/FFmpeg/FFmpeg ffmpeg
           cd ffmpeg
-          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --cc=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang --cxx=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++ --sysroot=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-postproc --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags=-O3\ -fPIC --extra-ldflags=-Wl,-z,max-page-size=16384
+          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --cc=$[STRIPPED 88 bytes] --cxx=$[STRIPPED 90 bytes] --sysroot=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-postproc --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags=-O3\ -fPIC --extra-ldflags=-Wl,-z,max-page-size=16384
           make -j$(nproc)
           make install
       - name: Build scanner
@@ -47,7 +50,7 @@ jobs:
           cmake --build build -j$(nproc)
       - name: Check 16KB alignment
         run: |
-          for so in $(find build -name "*.so"); do echo "$so:"; $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -l $so | grep -i align; done
+          for so in $(find build -name "*.so"); do echo "$so:"; $[STRIPPED 71 bytes] -l $so | grep -i align; done
       - uses: actions/upload-artifact@v4
         with:
           name: libreplaygain_scanner-arm64
