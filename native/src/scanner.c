@@ -15,7 +15,6 @@ extern "C" {
 #include <taglib/tpropertymap.h>
 #include <taglib/tstring.h>
 #include <taglib/tstringlist.h>
-
 JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env, jobject, jint fd) {
     char path[64];
     snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
@@ -119,7 +118,6 @@ JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env
     snprintf(json, sizeof(json), "{\"lufs\":%.2f,\"peak\":%.6f,\"gain\":%.2f}", lufs, peak, gain);
     return env->NewStringUTF(json);
 }
-
 JNIEXPORT jint JNICALL Java_com_himig_offline_RgScan_nativeWriteTags(JNIEnv* env, jobject, jint fd, jdouble trackGain, jdouble trackPeak, jdouble albumGain, jdouble albumPeak) {
     char path[64];
     snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
@@ -137,5 +135,5 @@ JNIEXPORT jint JNICALL Java_com_himig_offline_RgScan_nativeWriteTags(JNIEnv* env
     props.replace("REPLAYGAIN_ALBUM_PEAK", TagLib::StringList(TagLib::String(ap)));
     f.file()->setProperties(props);
     bool ok = f.save();
-    return ok? 0 : -2;
+    return ok ? 0 : -2;
 }
