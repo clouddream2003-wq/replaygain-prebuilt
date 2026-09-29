@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+project(replaygain_scanner C)
+add_library(replaygain_scanner SHARED src/scanner.c)
+find_package(ebur128 REQUIRED)
+target_include_directories(replaygain_scanner PRIVATE ${FFMPEG_DIR})
+target_link_libraries(replaygain_scanner ebur128 avcodec avformat avutil taglib_c z m log)
+set_target_properties(replaygain_scanner PROPERTIES LINK_FLAGS "-Wl,-z,max-page-size=16384")
