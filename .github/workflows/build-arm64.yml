@@ -41,7 +41,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/FFmpeg/FFmpeg ffmpeg
           cd ffmpeg
-          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --cc=aarch64-linux-android26-clang --cxx=aarch64-linux-android26-clang++ --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags=-O3\ -fPIC --extra-ldflags=-Wl,-z,max-page-size=16384
+          CC_BIN=$(find $ANDROID_NDK_HOME -name aarch64-linux-android26-clang | head -n1)
+          CXX_BIN=$(find $ANDROID_NDK_HOME -name aarch64-linux-android26-clang++ | head -n1)
+          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --cc="$CC_BIN" --cxx="$CXX_BIN" --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags=-O3\ -fPIC --extra-ldflags=-Wl,-z,max-page-size=16384
           make -j$(nproc)
           make install
       - name: Build scanner
@@ -50,7 +52,8 @@ jobs:
           cmake --build build -j$(nproc)
       - name: Check 16KB alignment
         run: |
-          for so in $(find build -name "*.so"); do echo "$so:"; llvm-readelf -l $so | grep -i align; done
+          READELF_BIN=$(find $ANDROID_NDK_HOME -name llvm-readelf | head -n1)
+          for so in $(find build -name "*.so"); do echo "$so:"; "$READELF_BIN" -l $so | grep -i align; done
       - uses: actions/upload-artifact@v4
         with:
           name: libreplaygain_scanner-arm64
