@@ -8,7 +8,6 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/channel_layout.h>
-#include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 }
 #include <ebur128.h>
@@ -57,21 +56,16 @@ JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env
         avformat_close_input(&fmt);
         return env->NewStringUTF("{\"error\":\"ebur128\"}");
     }
-    SwrContext* swr = swr_alloc();
-    if (!swr) {
+    AVChannelLayout outLayout;
+    av_channel_layout_default(&outLayout, channels);
+    SwrContext* swr = nullptr;
+    if (swr_alloc2(&swr, &outLayout, AV_SAMPLE_FMT_FLT, sampleRate, &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate, 0, nullptr) < 0 || !swr) {
+        av_channel_layout_uninit(&outLayout);
         ebur128_destroy(&r128);
         avcodec_free_context(&ctx);
         avformat_close_input(&fmt);
         return env->NewStringUTF("{\"error\":\"swr_alloc\"}");
     }
-    AVChannelLayout outLayout;
-    av_channel_layout_default(&outLayout, channels);
-    av_opt_set_chlayout(swr, "in_chlayout", &ctx->ch_layout, 0);
-    av_opt_set_int(swr, "in_sample_rate", ctx->sample_rate, 0);
-    av_opt_set_sample_fmt(swr, "in_sample_fmt", ctx->sample_fmt, 0);
-    av_opt_set_chlayout(swr, "out_chlayout", &outLayout, 0);
-    av_opt_set_int(swr, "out_sample_rate", sampleRate, 0);
-    av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     if (swr_init(swr) < 0) {
         av_channel_layout_uninit(&outLayout);
         swr_free(&swr);
