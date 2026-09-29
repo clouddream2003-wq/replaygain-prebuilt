@@ -8,6 +8,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 }
 #include <ebur128.h>
@@ -38,15 +39,7 @@ JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env
         return env->NewStringUTF("{\"error\":\"codec\"}");
     }
     AVCodecContext* ctx = avcodec_alloc_context3(codec);
-    if (!ctx) {
-        avformat_close_input(&fmt);
-        return env->NewStringUTF("{\"error\":\"alloc\"}");
-    }
-    if (avcodec_parameters_to_context(ctx, st->codecpar) < 0) {
-        avcodec_free_context(&ctx);
-        avformat_close_input(&fmt);
-        return env->NewStringUTF("{\"error\":\"params\"}");
-    }
+    avcodec_parameters_to_context(ctx, st->codecpar);
     ctx->thread_count = 0;
     ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     if (avcodec_open2(ctx, codec, nullptr) < 0) {
@@ -58,22 +51,27 @@ JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env
     if (channels <= 0) channels = 2;
     int sampleRate = ctx->sample_rate;
     if (sampleRate <= 0) sampleRate = 44100;
-    ebur128_state* r128 = ebur128_init((unsigned int)channels, (unsigned long)sampleRate, EBUR128_MODE_I);
+    ebur128_state* r128 = ebur128_init(channels, sampleRate, EBUR128_MODE_I);
     if (!r128) {
         avcodec_free_context(&ctx);
         avformat_close_input(&fmt);
         return env->NewStringUTF("{\"error\":\"ebur128\"}");
     }
-    AVChannelLayout outLayout;
-    av_channel_layout_default(&outLayout, channels);
-    SwrContext* swr = nullptr;
-    if (swr_alloc_set_opts2(&swr, &outLayout, AV_SAMPLE_FMT_FLT, sampleRate, &ctx->ch_layout, ctx->sample_fmt, ctx->sample_rate, 0, nullptr) < 0 || !swr) {
-        av_channel_layout_uninit(&outLayout);
+    SwrContext* swr = swr_alloc();
+    if (!swr) {
         ebur128_destroy(&r128);
         avcodec_free_context(&ctx);
         avformat_close_input(&fmt);
         return env->NewStringUTF("{\"error\":\"swr_alloc\"}");
     }
+    AVChannelLayout outLayout;
+    av_channel_layout_default(&outLayout, channels);
+    av_opt_set_chlayout(swr, "in_chlayout", &ctx->ch_layout, 0);
+    av_opt_set_int(swr, "in_sample_rate", ctx->sample_rate, 0);
+    av_opt_set_sample_fmt(swr, "in_sample_fmt", ctx->sample_fmt, 0);
+    av_opt_set_chlayout(swr, "out_chlayout", &outLayout, 0);
+    av_opt_set_int(swr, "out_sample_rate", sampleRate, 0);
+    av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
     if (swr_init(swr) < 0) {
         av_channel_layout_uninit(&outLayout);
         swr_free(&swr);
@@ -84,39 +82,23 @@ JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env
     }
     AVPacket* pkt = av_packet_alloc();
     AVFrame* frame = av_frame_alloc();
-    if (!pkt || !frame) {
-        if (pkt) av_packet_free(&pkt);
-        if (frame) av_frame_free(&frame);
-        av_channel_layout_uninit(&outLayout);
-        swr_free(&swr);
-        ebur128_destroy(&r128);
-        avcodec_free_context(&ctx);
-        avformat_close_input(&fmt);
-        return env->NewStringUTF("{\"error\":\"alloc_frame\"}");
-    }
     double peak = 0.0;
     while (av_read_frame(fmt, pkt) >= 0) {
         if (pkt->stream_index == streamIdx) {
             if (avcodec_send_packet(ctx, pkt) == 0) {
                 while (avcodec_receive_frame(ctx, frame) == 0) {
                     AVFrame* filt = av_frame_alloc();
-                    if (!filt) continue;
                     av_channel_layout_copy(&filt->ch_layout, &outLayout);
                     filt->sample_rate = sampleRate;
                     filt->format = AV_SAMPLE_FMT_FLT;
-                    if (swr_convert_frame(swr, filt, frame) < 0) {
-                        av_frame_free(&filt);
-                        continue;
-                    }
+                    swr_convert_frame(swr, filt, frame);
                     int nb = filt->nb_samples;
                     float* data = (float*)filt->data[0];
-                    if (data && nb > 0) {
-                        for (int i = 0; i < nb * channels; i++) {
-                            double v = fabs(data[i]);
-                            if (v > peak) peak = v;
-                        }
-                        ebur128_add_frames_float(r128, data, (size_t)nb);
+                    for (int i = 0; i < nb * channels; i++) {
+                        double v = fabs(data[i]);
+                        if (v > peak) peak = v;
                     }
+                    ebur128_add_frames_float(r128, data, nb);
                     av_frame_free(&filt);
                 }
             }
@@ -126,23 +108,17 @@ JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env
     avcodec_send_packet(ctx, nullptr);
     while (avcodec_receive_frame(ctx, frame) == 0) {
         AVFrame* filt = av_frame_alloc();
-        if (!filt) continue;
         av_channel_layout_copy(&filt->ch_layout, &outLayout);
         filt->sample_rate = sampleRate;
         filt->format = AV_SAMPLE_FMT_FLT;
-        if (swr_convert_frame(swr, filt, frame) < 0) {
-            av_frame_free(&filt);
-            continue;
-        }
+        swr_convert_frame(swr, filt, frame);
         int nb = filt->nb_samples;
         float* data = (float*)filt->data[0];
-        if (data && nb > 0) {
-            for (int i = 0; i < nb * channels; i++) {
-                double v = fabs(data[i]);
-                if (v > peak) peak = v;
-            }
-            ebur128_add_frames_float(r128, data, (size_t)nb);
+        for (int i = 0; i < nb * channels; i++) {
+            double v = fabs(data[i]);
+            if (v > peak) peak = v;
         }
+        ebur128_add_frames_float(r128, data, nb);
         av_frame_free(&filt);
     }
     double lufs = -70.0;
