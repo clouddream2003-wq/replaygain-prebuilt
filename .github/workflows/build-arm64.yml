@@ -41,7 +41,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/FFmpeg/FFmpeg ffmpeg
           cd ffmpeg
-          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --cc=aarch64-linux-android26-clang --cxx=aarch64-linux-android26-clang++ --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-postproc --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags=-O3\ -fPIC --extra-ldflags=-Wl,-z,max-page-size=16384
+          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --cc=aarch64-linux-android26-clang --cxx=aarch64-linux-android26-clang++ --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags=-O3\ -fPIC --extra-ldflags=-Wl,-z,max-page-size=16384
           make -j$(nproc)
           make install
       - name: Build scanner
