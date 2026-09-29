@@ -1,65 +1,158 @@
-name: build-arm64
-on:
-  push:
-    tags:
-      - v*
-  workflow_dispatch:
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 11
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config unzip
-      - name: Use preinstalled NDK
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-          ls -d /usr/local/lib/android/sdk/ndk/*
-      - name: Build ebur128
-        run: |
-          git clone --depth 1 https://github.com/jiixyj/libebur128.git
-          cmake -S libebur128 -B libebur128/build -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_shared -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_FLAGS="-fPIC -DPIC" -DCMAKE_CXX_FLAGS="-fPIC -DPIC"
-          cmake --build libebur128/build -j$(nproc)
-          cmake --install libebur128/build --prefix $GITHUB_WORKSPACE/install
-      - name: Build TagLib
-        run: |
-          git clone --depth 1 --branch v2.0.2 --recurse-submodules https://github.com/taglib/taglib.git
-          cd taglib
-          git submodule update --init --recursive
-          cd ..
-          cmake -S taglib -B taglib/build -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_shared -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=OFF -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWITH_MP4=ON -DWITH_ASF=ON -DBUILD_TESTS=OFF -DBUILD_EXAMPLES=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_FLAGS="-fPIC -DPIC" -DCMAKE_CXX_FLAGS="-fPIC -DPIC"
-          cmake --build taglib/build -j$(nproc)
-          cmake --install taglib/build --prefix $GITHUB_WORKSPACE/install
-      - name: Build FFmpeg arm64
-        run: |
-          git clone --depth 1 --branch release/7.1 https://github.com/FFmpeg/FFmpeg ffmpeg
-          cd ffmpeg
-          CC_BIN=$(find $ANDROID_NDK_HOME -name aarch64-linux-android26-clang | head -n1)
-          CXX_BIN=$(find $ANDROID_NDK_HOME -name aarch64-linux-android26-clang++ | head -n1)
-          AR_BIN=$(find $ANDROID_NDK_HOME -name llvm-ar | head -n1)
-          RANLIB_BIN=$(find $ANDROID_NDK_HOME -name llvm-ranlib | head -n1)
-          STRIP_BIN=$(find $ANDROID_NDK_HOME -name llvm-strip | head -n1)
-          NM_BIN=$(find $ANDROID_NDK_HOME -name llvm-nm | head -n1)
-          ./configure --target-os=android --arch=aarch64 --enable-cross-compile --enable-pic --cc="$CC_BIN" --cxx="$CXX_BIN" --ar="$AR_BIN" --ranlib="$RANLIB_BIN" --strip="$STRIP_BIN" --nm="$NM_BIN" --prefix=$GITHUB_WORKSPACE/install --disable-programs --disable-doc --disable-avdevice --disable-swscale --disable-avfilter --enable-avformat --enable-avcodec --enable-swresample --enable-static --disable-shared --enable-decoder=flac --enable-decoder=mp3 --enable-decoder=aac --enable-decoder=alac --enable-decoder=opus --enable-decoder=vorbis --enable-decoder=wavpack --enable-decoder=ape --enable-demuxer=flac --enable-demuxer=mp3 --enable-demuxer=aac --enable-demuxer=mov --enable-demuxer=ogg --enable-demuxer=wav --extra-cflags="-O3 -fPIC -DPIC" --extra-cxxflags="-O3 -fPIC -DPIC" --extra-asflags="-fPIC -DPIC" --extra-ldflags="-fPIC -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
-          make -j$(nproc)
-          make install
-      - name: Build scanner
-        run: |
-          if [ -f native/src/scanner.c ]; then mv native/src/scanner.c native/src/scanner.cpp; fi
-          ls -l native/src/
-          cmake -S native -B build -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_shared -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=OFF -DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/install -DFFMPEG_DIR=$GITHUB_WORKSPACE/install -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-          cmake --build build -j$(nproc)
-      - name: Check 16KB alignment
-        run: |
-          READELF_BIN=$(find $ANDROID_NDK_HOME -name llvm-readelf | head -n1)
-          for so in $(find build -name "*.so"); do echo "$so:"; "$READELF_BIN" -l $so | grep -i align; done
-      - uses: actions/upload-artifact@v4
-        with:
-          name: libreplaygain_scanner-arm64
-          path: build/libreplaygain_scanner.so
+#include <jni.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+extern "C" {
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/samplefmt.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/opt.h>
+#include <libswresample/swresample.h>
+}
+#include <ebur128.h>
+#include <taglib/fileref.h>
+#include <taglib/tpropertymap.h>
+#include <taglib/tstring.h>
+#include <taglib/tstringlist.h>
+JNIEXPORT jstring JNICALL Java_com_himig_offline_RgScan_nativeScanFd(JNIEnv* env, jobject, jint fd) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+    AVFormatContext* fmt = nullptr;
+    if (avformat_open_input(&fmt, path, nullptr, nullptr) < 0) {
+        return env->NewStringUTF("{\"error\":\"open\"}");
+    }
+    if (avformat_find_stream_info(fmt, nullptr) < 0) {
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"stream_info\"}");
+    }
+    int streamIdx = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (streamIdx < 0) {
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"no_audio\"}");
+    }
+    AVStream* st = fmt->streams[streamIdx];
+    const AVCodec* codec = avcodec_find_decoder(st->codecpar->codec_id);
+    if (!codec) {
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"codec\"}");
+    }
+    AVCodecContext* ctx = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(ctx, st->codecpar);
+    ctx->thread_count = 0;
+    ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    if (avcodec_open2(ctx, codec, nullptr) < 0) {
+        avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"open_codec\"}");
+    }
+    int channels = ctx->ch_layout.nb_channels;
+    if (channels <= 0) channels = 2;
+    int sampleRate = ctx->sample_rate;
+    if (sampleRate <= 0) sampleRate = 44100;
+    ebur128_state* r128 = ebur128_init(channels, sampleRate, EBUR128_MODE_I);
+    if (!r128) {
+        avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"ebur128\"}");
+    }
+    SwrContext* swr = swr_alloc();
+    if (!swr) {
+        ebur128_destroy(&r128);
+        avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"swr_alloc\"}");
+    }
+    AVChannelLayout outLayout;
+    av_channel_layout_default(&outLayout, channels);
+    av_opt_set_chlayout(swr, "in_chlayout", &ctx->ch_layout, 0);
+    av_opt_set_int(swr, "in_sample_rate", ctx->sample_rate, 0);
+    av_opt_set_sample_fmt(swr, "in_sample_fmt", ctx->sample_fmt, 0);
+    av_opt_set_chlayout(swr, "out_chlayout", &outLayout, 0);
+    av_opt_set_int(swr, "out_sample_rate", sampleRate, 0);
+    av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
+    if (swr_init(swr) < 0) {
+        av_channel_layout_uninit(&outLayout);
+        swr_free(&swr);
+        ebur128_destroy(&r128);
+        avcodec_free_context(&ctx);
+        avformat_close_input(&fmt);
+        return env->NewStringUTF("{\"error\":\"swr_init\"}");
+    }
+    AVPacket* pkt = av_packet_alloc();
+    AVFrame* frame = av_frame_alloc();
+    double peak = 0.0;
+    while (av_read_frame(fmt, pkt) >= 0) {
+        if (pkt->stream_index == streamIdx) {
+            if (avcodec_send_packet(ctx, pkt) == 0) {
+                while (avcodec_receive_frame(ctx, frame) == 0) {
+                    AVFrame* filt = av_frame_alloc();
+                    av_channel_layout_copy(&filt->ch_layout, &outLayout);
+                    filt->sample_rate = sampleRate;
+                    filt->format = AV_SAMPLE_FMT_FLT;
+                    swr_convert_frame(swr, filt, frame);
+                    int nb = filt->nb_samples;
+                    float* data = (float*)filt->data[0];
+                    for (int i = 0; i < nb * channels; i++) {
+                        double v = fabs(data[i]);
+                        if (v > peak) peak = v;
+                    }
+                    ebur128_add_frames_float(r128, data, nb);
+                    av_frame_free(&filt);
+                }
+            }
+        }
+        av_packet_unref(pkt);
+    }
+    avcodec_send_packet(ctx, nullptr);
+    while (avcodec_receive_frame(ctx, frame) == 0) {
+        AVFrame* filt = av_frame_alloc();
+        av_channel_layout_copy(&filt->ch_layout, &outLayout);
+        filt->sample_rate = sampleRate;
+        filt->format = AV_SAMPLE_FMT_FLT;
+        swr_convert_frame(swr, filt, frame);
+        int nb = filt->nb_samples;
+        float* data = (float*)filt->data[0];
+        for (int i = 0; i < nb * channels; i++) {
+            double v = fabs(data[i]);
+            if (v > peak) peak = v;
+        }
+        ebur128_add_frames_float(r128, data, nb);
+        av_frame_free(&filt);
+    }
+    double lufs = -70.0;
+    ebur128_loudness_global(r128, &lufs);
+    double gain = -18.0 - lufs;
+    if (peak < 0.000001) peak = 0.000001;
+    if (peak > 1.0) peak = 1.0;
+    ebur128_destroy(&r128);
+    swr_free(&swr);
+    av_channel_layout_uninit(&outLayout);
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    avcodec_free_context(&ctx);
+    avformat_close_input(&fmt);
+    char json[256];
+    snprintf(json, sizeof(json), "{\"lufs\":%.2f,\"peak\":%.6f,\"gain\":%.2f}", lufs, peak, gain);
+    return env->NewStringUTF(json);
+}
+JNIEXPORT jint JNICALL Java_com_himig_offline_RgScan_nativeWriteTags(JNIEnv* env, jobject, jint fd, jdouble trackGain, jdouble trackPeak, jdouble albumGain, jdouble albumPeak) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+    TagLib::FileRef f(path);
+    if (f.isNull()) return -1;
+    char tg[32], tp[32], ag[32], ap[32];
+    snprintf(tg, sizeof(tg), "%.2f dB", trackGain);
+    snprintf(tp, sizeof(tp), "%.6f", trackPeak);
+    snprintf(ag, sizeof(ag), "%.2f dB", albumGain);
+    snprintf(ap, sizeof(ap), "%.6f", albumPeak);
+    TagLib::PropertyMap props = f.file()->properties();
+    props.replace("REPLAYGAIN_TRACK_GAIN", TagLib::StringList(TagLib::String(tg)));
+    props.replace("REPLAYGAIN_TRACK_PEAK", TagLib::StringList(TagLib::String(tp)));
+    props.replace("REPLAYGAIN_ALBUM_GAIN", TagLib::StringList(TagLib::String(ag)));
+    props.replace("REPLAYGAIN_ALBUM_PEAK", TagLib::StringList(TagLib::String(ap)));
+    f.file()->setProperties(props);
+    bool ok = f.save();
+    return ok ? 0 : -2;
+}
